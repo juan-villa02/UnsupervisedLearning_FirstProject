@@ -1,0 +1,1290 @@
+---
+title: "Unsupervised Learning Techniques - Project 1"
+author: "Juan Villanueva Romero"
+date: "22/10/2021"
+output: html_document
+---
+
+```{r}
+
+rm(list = ls())
+setwd("/Users/JUAN/Desktop/Ciencia e ingeniería de datos/2º/Statistical learning I/1stLAB")
+
+```
+
+# Download and read the data
+
+The dataset used for this project has been obtained from Kaggle and can be found following the link mentioned below:
+
+https://www.kaggle.com/imakash3011/customer-personality-analysis
+
+```{r}
+
+marketing_data = read.csv("marketing_campaign.csv", header = T, sep = "\t")
+
+```
+
+Before starting to work on the dataset, we need to make a description of the varibles which compose it and their meaning.
+
+# Description of the dataset
+
+## Context
+
+
+This dataset is aimed for Customer Personality Analysis. It contains information about different customers of a company.
+
+The main target of this project is to group customers based on similarities so that in the future we can create specific marketing for each of those groups. The idea is that, by knowing the necessities of each group, we can find an easier and faster solution
+
+## Attributes
+
+1. ID: Customer's unique identifier
+2. Year_Birth: Customer's birth year
+3. Education: Customer's education level
+4. Marital_Status: Customer's marital status
+5. Income: Customer's yearly household income
+6. Kidhome: Number of children in customer's household
+7. Teenhome: Number of teenagers in customer's household
+8. Dt_Customer: Date of customer's enrollment with the company
+9. Recency: Number of days since customer's last purchase
+10. Complain: 1 if customer complained in the last 2 years, 0 otherwise
+11. MntWines: Amount spent on wine in last 2 years
+12. MntFruits: Amount spent on fruits in last 2 years
+13. MntMeatProducts: Amount spent on meat in last 2 years
+14. MntFishProducts: Amount spent on fish in last 2 years
+15. MntSweetProducts: Amount spent on sweets in last 2 years
+16. MntGoldProds: Amount spent on gold in last 2 years
+17. NumDealsPurchases: Number of purchases made with a discount
+18. AcceptedCmp1: 1 if customer accepted the offer in the 1st campaign, 0 otherwise
+19. AcceptedCmp2: 1 if customer accepted the offer in the 2nd campaign, 0 otherwise
+20. AcceptedCmp3: 1 if customer accepted the offer in the 3rd campaign, 0 otherwise
+21. AcceptedCmp4: 1 if customer accepted the offer in the 4th campaign, 0 otherwise
+22. AcceptedCmp5: 1 if customer accepted the offer in the 5th campaign, 0 otherwise
+23. Response: 1 if customer accepted the offer in the last campaign, 0 otherwise
+24. NumWebPurchases: Number of purchases made through the company’s web site
+25. NumCatalogPurchases: Number of purchases made using a catalogue
+26. NumStorePurchases: Number of purchases made directly in stores
+27. NumWebVisitsMonth: Number of visits to company’s web site in the last month
+28. Z_CostContact: no description of this variable (it will be dropped)
+29. Z-Revenue: no description of this variable (it will be dropped)
+
+
+# Cleaning the dataset
+```{r}
+
+library(ggplot2)
+
+```
+
+First of all, as we are not interested in the customers' IDs at the moment, we can save the column for any later use.
+
+```{r}
+
+customer_ids = marketing_data$ID
+
+marketing_data$ID = NULL
+
+```
+
+## Missing Values (NAs)
+
+Let's check for missing values in our dataset. 
+On one side, we can check the number of rows containing NAs. We will use a histogram representing the mean number of NAs on the x-axis. 
+
+```{r}
+
+ggplot() + geom_histogram(aes(x=rowMeans(is.na(marketing_data))),bins=10,fill="#0DA9E4") + 
+  labs(x="NA",title="Histogram - Missing data values")
+
+```
+
+On the other hand, we can graphically represent the number of missing values by column, which seems to be more visual for us.
+
+```{r}
+
+options(repr.plot.width=12)
+
+```
+
+We can create a data frame either containing the mean of NAs by column or containing the total number of missing values.
+
+```{r}
+
+na = data.frame(colMeans(is.na(marketing_data)))
+
+```
+
+### Percentage
+
+```{r}
+
+ggplot() + geom_col(aes(x=rownames(na),y=na[,1]),fill="#0DA9E4") + theme(axis.text.x=element_text(angle=90,size=8,vjust=0.5)) + 
+  labs(title= "NAs per variable",x="Variables",y="Percentage - %")
+
+```
+
+### Total number
+
+```{r}
+
+na_total_columns = data.frame(colSums(is.na(marketing_data)))
+#na_total_columns = data.frame(apply(X = is.na(marketing_data), MARGIN = 2, FUN = sum))
+na_total_columns
+
+ggplot() + geom_col(aes(x = rownames(na_total_columns), y = na_total_columns[,1]), fill = "#FF00FF") + theme(axis.text.x=element_text(angle=90,size=10,vjust=0.2)) + 
+  labs(x="Variables",y="Total number of NAs")
+
+```
+
+As we can see, only one variable contains missing values. The percentage is approximately 0.01%, and the total number is 24. As it is a small percentage of the data, we could just eliminate the observations, but instead I will fill the NAs with the mean value of the variable.
+
+```{r}
+
+mean_income = round(mean(marketing_data$Income, na.rm = TRUE))
+marketing_data$Income[is.na(marketing_data$Income)] = mean_income
+
+```
+
+```{r}
+
+summary(marketing_data)
+
+```
+
+## Feature Engineering
+
+Let's eliminate some variables which do not provide any information to us. All the rows in the columns Z_CostContact and Z_Revenue have the same value, so we can directly eliminate them.
+
+```{r}
+
+marketing_data$Z_CostContact = NULL
+marketing_data$Z_Revenue = NULL
+
+```
+
+```{r}
+
+str(marketing_data)
+
+```
+
+We can also see that all the variables are numerical except three of them, which may need some transformations in order to be useful for this project.
+
+```{r}
+
+marketing_data$Education = as.factor(marketing_data$Education)
+marketing_data$Marital_Status = as.factor(marketing_data$Marital_Status)
+
+```
+
+In the case of the customers' date of enrollment , we change the type of variable to date. As it is considerably more difficult to work with dates rather than with numeric values, I have decided to compute the number of days a customer has been enrolled to the company.
+
+```{r}
+
+marketing_data$Dt_Customer = as.Date(marketing_data$Dt_Customer, format = "%d-%m-%Y" )
+dates = marketing_data$Dt_Customer
+
+```
+
+The author of the dataset affirms that it was collected around 2015. I will take the beginning of the year as a reference to work with.
+
+```{r}
+
+default_date = as.Date("01-01-2015", format = "%d-%m-%Y")
+
+date_collected = rep(default_date,length(dates))
+marketing_data$Dt_Customer = NULL
+
+marketing_data$Days_Enrolled = as.numeric(abs(date_collected - dates))
+
+```
+
+Also, it will be easier for me to work with age of the customers rather than the year of birth. So, we compute the difference of years and create a new variable.
+
+```{r}
+
+marketing_data$Age = rep(2015,length(marketing_data$Year_Birth)) - marketing_data$Year_Birth
+
+```
+
+Next, we eliminate the Year_birth column.
+
+```{r}
+
+marketing_data$Year_Birth = NULL
+
+```
+
+To simplify the work, I have decided to create only two categories for the marital status variable. So,the only two categories which will be later transformed into a dummy column are "relationship" and "alone" 
+
+```{r}
+
+different_status = unique(marketing_data$Marital_Status)
+different_status
+
+
+
+marketing_data$Marital_Status = as.character(marketing_data$Marital_Status)
+
+relationship = which(marketing_data$Marital_Status == "Together" | marketing_data$Marital_Status == "Married") #1
+alone = which(marketing_data$Marital_Status != "Together" & marketing_data$Marital_Status != "Married") #0
+
+```
+
+Now, we apply this change to the column
+
+```{r}
+
+marketing_data[alone,2] = 0
+marketing_data[relationship,2] = 1
+
+marketing_data$Marital_Status = as.numeric(marketing_data$Marital_Status)
+
+```
+
+We only have one remaining variable not numerical: "Education". First, lets see the levels of the variable.
+
+```{r}
+
+levels(marketing_data$Education)
+
+```
+
+We use a plot to see if there is a significant difference in the number of people who studied in the university and those who did not.
+
+```{r}
+
+ggplot(marketing_data) + geom_bar(aes(x = Education),fill="light blue") +
+  labs(title= "Number of people per type of study")
+
+```
+
+Let's see now the distribution of the income depending on the studies.
+It is important to scale the data.
+
+```{r}
+
+ggplot(data.frame(scale(marketing_data[,-1]))) + geom_boxplot(aes(x=marketing_data$Education, y = Income,fill=marketing_data$Education),outlier.color="red") +
+  theme(legend.position = "none")
+
+```
+
+
+We can see a very extreme outlier which belongs to the "Graduation" value and that may considerably affect the study of the dataset.Let's remove it before extracting any conclusion.
+
+```{r}
+
+outlier = boxplot.stats(marketing_data$Income[marketing_data$Education == "Graduation"])$out
+outlier 
+
+extreme_outlier_index = which(marketing_data$Income == 666666)
+
+#Remove the observation containing the extreme outlier
+marketing_data = marketing_data[-extreme_outlier_index,]
+
+#We also remove it from the IDs to avoid future problems of graphical representation
+
+customer_ids = customer_ids[-extreme_outlier_index]
+
+```
+
+Now we can represent the boxplots again.
+
+```{r}
+
+ggplot(data.frame(scale(marketing_data[,-1]))) + geom_boxplot(aes(x=marketing_data$Education, y = Income ,fill=marketing_data$Education),outlier.color="red") +
+  theme(legend.position = "none")
+
+```
+
+We observe that the distribution of the income is quite symmetric in all the cases.
+However, in the case of the people with basic studies the mean is considerably lower and the variance is also low.
+Maybe, it could be interesting to group in two separate categories the variable "Education": basic studies (0), higher studies (2n Cycle, Graduation, Master, PhD) (1).
+
+```{r}
+
+basic_studies = which(marketing_data$Education == "Basic")
+
+marketing_data$Education = as.character(marketing_data$Education)
+
+marketing_data$Education[basic_studies] = 0
+
+marketing_data$Education[-basic_studies] = 1
+
+marketing_data$Education = as.numeric(marketing_data$Education)
+
+```
+
+Also, we can maybe simplify the columns "Kidhome" and "Teenhome" by summing them. It seems to me that it is not too relevant whether the children of customers are kids or teenagers.
+
+```{r}
+
+marketing_data$Children = marketing_data$Kidhome + marketing_data$Teenhome
+
+marketing_data$Kidhome = NULL
+marketing_data$Teenhome = NULL
+
+```
+
+Now, we can create a new column which specifies the total number of products instead of differentiating them
+
+```{r}
+
+marketing_data$TotProds = marketing_data$MntWines + marketing_data$MntFruits + marketing_data$MntMeatProducts + marketing_data$MntFishProducts + marketing_data$MntSweetProducts + marketing_data$MntGoldProds
+
+marketing_data$MntWines = NULL
+marketing_data$MntFruits = NULL
+marketing_data$MntMeatProducts = NULL
+marketing_data$MntFishProducts = NULL
+marketing_data$MntSweetProducts = NULL
+marketing_data$MntGoldProds = NULL
+
+```
+
+Finally, let's see the correlations between the variables
+
+```{r}
+
+library(GGally)
+
+```
+
+```{r}
+
+ggcorr(marketing_data, label = T,label_size = 3, legend.size = 9)
+
+```
+
+As we can see, the "dummy" columns are not providing so much information. Many of them are just correlated between them (as expected).Because of this, I will not use these variables at the moment.
+
+```{r}
+
+marketing_data1 = marketing_data[,-c(1,2,10,11,12,13,14,15,16)]
+
+```
+
+By using the __pairs__ function we can graphically see the relations between all the variables.
+
+```{r}
+
+pairs(marketing_data1)
+
+```
+
+# Data Visualization
+
+By taking a look to the graphs generated by the __pairs__ function, we can see only the Income and the TotProds variables seem to have a strong linear relationship.
+
+Let's plot this relation individually.
+
+```{r}
+
+ggplot(marketing_data1) + geom_point(aes(x = Income, y = TotProds)) +
+  labs(title = "Relation between Income and Total Number of Products")
+
+```
+What if we do the same representation but including the marital status?
+
+```{r}
+
+ggplot(marketing_data1) + geom_point(aes(x = Income, y = TotProds, color = as.factor(marketing_data$Marital_Status))) +
+  labs(title = "Relation between Income and Total Number of Products") +
+  scale_color_discrete(name = "Marital Status", labels = c("Alone", "Relationship"))
+
+```
+We can see that apparently there is no relation between these two variables and the marital status.
+
+What if we try to represent the distribution of income for each marital status using a histogram?
+
+
+```{r}
+
+ggplot(marketing_data) + geom_histogram(aes(x = Income, y = ..density.., color = as.factor(Marital_Status)), bins = 20) +
+  facet_wrap(~Marital_Status) +
+  labs(title = "Distribution of the income for each marital status") +
+  scale_color_discrete(name = "Marital Status", labels = c("Alone", "Relationship"))
+
+
+```
+
+Again it is clear that the marital status does not affect the distribution of the income.
+
+Let's also analyze the distribution of age of the customers based on their level of studies
+
+```{r}
+
+ggplot(marketing_data) + geom_density(aes(x = Age, y = ..density.., color = as.factor(Education))) +
+  facet_wrap(~Education) +
+  labs(title = "Distribution of the age for each education level") +
+  scale_color_discrete(name = "Education", labels = c("Basic studies", "High level studies"))
+
+
+```
+As we could imagine, the distribution of age in the case of people with basic studies is centered around low ages (young people), while the distribution of age for people with high level studies is in someway bimodal and has a higher variability.
+
+To finish with data visualization, let's try to see the distribution of the recency variable. This could allow us to understand how often customers buy new products.
+
+```{r}
+
+ggplot(marketing_data) + geom_histogram(aes(x = Recency, y = ..density..), bins = 20, fill = "lightgreen",color = "black") +
+  geom_density(aes(x = Recency, y = ..density..),color = "red") +
+  labs(title = "Distribution of the recency")
+
+
+```
+
+Unfortunately we are not able to extract any conclusion from this histogram (it does not follow any well known distribution), so maybe there is no way to explain using this dataset the frequency with which customers buy products in this company.
+
+
+# PCA
+
+There are some libraries which we need to initialize before computing the PCA
+
+```{r}
+
+options(warnings=-1)
+library(tidyverse)
+library(factoextra) # ggplot2-based visualization of pca
+
+```
+
+```{r}
+
+pca = prcomp(marketing_data1,scale = T)
+
+summary(pca)
+
+```
+
+We can see that the percentage of variance explained by each component is high in the first two components and then starts to decrease.
+
+Let's plot the variance explained by each component with a barplot and then the cumulative sum.
+
+```{r}
+
+names(pca)
+
+```
+
+The following data frame contains the variance explained by each component and the cummulative sum of these variances.
+
+```{r}
+
+aux = data.frame(x = 1:11, y = (pca$sdev)^2, z = cumsum((pca$sdev)^2))
+
+```
+
+```{r}
+
+ggplot(aux) + geom_col(aes(x = x, y = y))
+
+```
+
+```{r}
+
+ggplot(aux) + geom_col(aes(x = x, y = z))
+
+```
+
+The representation of the variance of each component can be also done by using the default functions of R or the package factoextra.
+
+```{r}
+
+screeplot(pca,main="Screeplot",col="lightgreen",type="barplot",pch=19)
+
+```
+
+```{r}
+
+fviz_screeplot(pca, addlabels = TRUE)
+
+```
+
+
+If we consider the first 3 components, we can explain around a 65% of the variance, which may be sufficient at the moment.It is time to focus on the components, more specifically, on the loadings for each of them.
+
+# First component
+
+```{r}
+
+barplot(pca$rotation[,1],cex.names = 0.6)
+
+```
+
+Note the sum of the squared loadings (eigenvectors) is equal to 1.
+
+```{r}
+
+sum(pca$rotation[,1]^2)
+
+```
+
+
+In this way, it is much easier for us to represent the square loadings.
+In fact, this squared loadings are commonly known as the contributions of the variables to the components.
+So, let's plot the squared loadings.
+
+```{r}
+
+fviz_contrib(pca, choice = "var", axes = 1)
+
+```
+
+The first 5 variables are above the expected average contribution.
+Notice that the Income and TotProds are the two first ones.
+This means that probably the customers can be mostly classified by their income and bought products.
+Now, we can order the customers by their first PC scores. We use the IDs that we saved at the beginning of the notebook.
+
+```{r}
+
+customer_ids[order(pca$x[,1])][1:10]
+
+```
+
+The obtained IDs correspond to the 10 "best customers" for the company based on the first component.Basically, these are the best customers based on the income and the total bought products.
+
+# Second component
+
+```{r}
+
+barplot(pca$rotation[,2],cex.names = 0.6)
+
+```
+
+The contributions of each variable to the second component are the following ones.
+
+```{r}
+
+fviz_contrib(pca,choice="var",axes=2)
+
+```
+
+In this case, the variables which contribute the most are  NumDealsPurchases and Days_Enrolled.
+
+Let's rank the customers by the scores of the second component
+
+```{r}
+
+customer_ids[order(pca$x[,2])][1:10]
+
+```
+
+The obtained IDs correspond to the 10 "best customers" for the company based on the second component.
+In this situation, the customers are ranked based on the number of deals purchases and their loyalty to the firm.
+
+
+# Third component
+
+```{r}
+
+barplot(pca$rotation[,3],cex.names = 0.6)
+
+```
+
+The contributions of each variable to the third component are the following ones.
+
+```{r}
+
+fviz_contrib(pca,choice="var",axes=3)
+
+```
+
+In this case, the variables which contribute the most are Age and Days_Enrolled.
+
+Let's rank the customers by the scores of the third component
+
+```{r}
+
+customer_ids[order(pca$x[,3])][1:10]
+
+```
+
+The obtained IDs correspond to the 10 "best customers" for the company based on the third component.
+In this situation, the customers are ranked based on the age and their loyalty to the firm.
+
+
+Let's visualize the customers' contribution to the components.
+
+```{r}
+
+head(get_pca_ind(pca)$contrib[,1])*1000 # this is in %, that is between 0 and 100
+
+```
+
+On the other hand, we can plot the global contribution of each player by using a density function.
+
+```{r}
+
+fviz_contrib(pca,choice="ind",axes=1)
+
+fviz_contrib(pca,choice="ind",axes=2)
+
+fviz_contrib(pca,choice="ind",axes=3)
+
+```
+
+We can drag the conclusion that customers contribute more to the first principal component.
+
+Let's see the IDs of the "best" customers based on their contribution to the first component 
+
+```{r}
+
+customer_ids[order(get_pca_ind(pca)$contrib[,1],decreasing=T)][1:10]
+
+```
+
+As we can see, the top 10 is very similar to the one we get when we rank the customers based on the variables which contribute the most to the first component.
+
+Finally, let's plot the contribution of the top-10 best customers by making a zoom to the previous density plots.
+
+```{r}
+
+fviz_contrib(pca,choice="ind",axes=1,top=10) + scale_x_discrete(labels=customer_ids)
+
+```
+
+Due to the great number of observations we have, it is not useful to use the biplot function to represent the variables and observations in the same graph.
+However, let's represent the contribution of the different variables to the principal components in a different way.
+
+```{r}
+
+fviz_pca_var(pca,col.var="contrib")
+
+```
+
+# SCORES
+
+```{r}
+
+options(repr.plot.width=16,repr.plot.height=10)
+
+```
+
+The following plot shows the scores of the two first components. The color represents the income of the customers.
+
+```{r}
+
+data.frame(z1=pca$x[,1],z2=pca$x[,2],Income = marketing_data1$Income) %>% 
+  ggplot(aes(z1,z2,label=customer_ids,color = Income)) + geom_point(size=0) +
+  labs(title="PCA", x="PC1", y="PC2") +
+  theme_bw() + scale_color_gradient(low="lightblue", high="darkblue")+theme(legend.position="bottom") + 
+  geom_text(size=5, hjust=0.6, vjust=0, check_overlap = TRUE)
+
+```
+
+We can see that there is no correlation between the two first PCs (as it is obviously expected) and that they are independent.
+
+Now, let's make the same representation using the total products bought by a customer as the color.
+
+```{r}
+
+data.frame(z1=pca$x[,1],z2=pca$x[,2],TotProds = marketing_data1$TotProds) %>% 
+  ggplot(aes(z1,z2,label=customer_ids,color = TotProds)) + geom_point(size=0) +
+  labs(title="PCA", x="PC1", y="PC2") +
+  theme_bw() + scale_color_gradient(low="lightblue", high="darkblue")+theme(legend.position="bottom") + 
+  geom_text(size=5, hjust=0.6, vjust=0, check_overlap = TRUE)
+
+```
+
+Finally, it is time to see if the "best" customers have the highest income and the highest number of bought products
+
+```{r}
+
+data.frame(z1=-pca$x[,1],z2=marketing_data1$Income) %>% 
+  ggplot(aes(z1,z2,label=customer_ids,color=z2)) + geom_point(size=0) +
+  labs(title="PCA", x="PC1", y="Income") +
+  theme_bw() + scale_color_gradient(low="yellow", high="darkred")+theme(legend.position="bottom") + 
+  geom_text(size=5, hjust=0.6, vjust=0, check_overlap = TRUE) 
+
+```
+
+Apparently, it is true that the best customers are the ones having the highest incomes.
+
+### What about the number of products?
+
+```{r}
+
+data.frame(z1=-pca$x[,1],z2=marketing_data1$TotProds) %>% 
+  ggplot(aes(z1,z2,label=customer_ids,color=z2)) + geom_point(size=0) +
+  labs(title="PCA", x="PC1", y="Total number of products") +
+  theme_bw() + scale_color_gradient(low="yellow", high="darkred")+theme(legend.position="bottom") + 
+  geom_text(size=5, hjust=0.6, vjust=0, check_overlap = TRUE) 
+
+```
+
+As expected, the customers who buy the most are the ones best ranked based on the principal components.
+
+
+# Factor Analysis
+
+Now, let's use Factor Analysis instead of PCA to compute a reduction of dimensions on our dataset.
+We will be using the function factanal with 3 factors and no rotation.
+
+```{r}
+
+x = marketing_data1
+
+x.f = factanal(x,factors=3,rotation="none",scrores="regression")
+
+x.f
+
+```
+
+The variance explained by the three first factors is around 52%, which is not a very high number.
+
+```{r}
+
+names(x.f)
+
+```
+
+As we can see, the function factanal generates diffrent components, including the correlation matrix of the variables
+
+```{r}
+
+x.f$correlation
+
+```
+
+```{r}
+
+round(x.f$correlation - (x.f$loadings %*% t(x.f$loadings) + diag(x.f$uniquenesses)),3)
+
+```
+
+```{r}
+
+cbind(x.f$loadings,x.f$uniquenesses)
+
+```
+
+
+## Interpretation of the Factor Analysis
+
+Let's represent graphically the contribution of the variables to the different factors
+
+```{r}
+
+barplot(x.f$loadings[,1],col="darkblue",ylim=c(-1,1))
+barplot(x.f$loadings[,2],col="darkblue",ylim=c(-1,1))
+barplot(x.f$loadings[,3],las=2,col="darkblue",ylim=c(-1,1))
+
+```
+
+Now estimate the model with only two factors, rotation varimax (sparser representation), and Barlett estimation for scores (WLS).
+
+```{r}
+
+x.f1 = factanal(x,factors = 2,rotation="varimax",scores="Bartlett")
+x.f1
+
+```
+
+The variance explained by the two factors is around 45%, which is not high enough to conclude that the different variables lay on dimension 2.
+
+```{r}
+
+cbind(x.f$loadings, x.f$uniquenesses)
+
+```
+
+```{r}
+
+barplot(x.f$loadings[,1], las=2, col="darkblue", ylim = c(-1, 1))
+barplot(x.f$loadings[,2], las=2, col="darkblue", ylim = c(-1, 1))
+
+```
+
+We can see that the first factor has more weights related to the income and total products bought by customers, while the second factor focuses mainly on the purchases.
+
+
+# Clustering
+
+As it is already clear, we are studying and analyzing a dataset containing information about customers of a company.
+Based on the conclusions and results we have already obtained due to PCA and Factor Analysis, we are able to develop a hypothesis about the clusters.Although it is not totally clear the number of clusters in which we can group customers, I think we can clearly affirm that these groups will highly depend on the income and total products bought by the customers.Nevertheless, let's try to prove this hypothesis.
+
+```{r}
+
+pca = prcomp(marketing_data1,scale = T)
+
+data.frame(x=-pca$x[,1],y=pca$x[,2]) %>%
+  ggplot(aes(x,y,label=customer_ids)) + geom_point(size=0) + geom_text(aes(label=customer_ids),size=2,hjust=0.6,vjust=0,check_overlap=T) +
+  labs(x='PCA1',y='PCA2') + theme_bw()
+
+```
+
+This graphical representation is the one we will be using to define the clusters.
+The IDs of the customers will stay in the same position and the clusters will be colored over them.
+
+
+## K-Means
+
+Let's start, for instance, with 5 clusters. Maybe the customers can be grouped by their level of studies.
+Remember that, at the beginning of this notebook, it is specified that a customer can have the following levels: basic, 2nd cycle, graduate, master, PhD.
+
+```{r}
+
+x = scale(marketing_data1) #We are using the dataset which does not contain the dummy columns.
+fit = kmeans(x,centers = 5, nstart = 100)
+print(names(fit))
+groups = fit$cluster
+groups
+
+```
+
+Let's see if the groups are well balanced
+
+```{r}
+
+barplot(table(groups), col= "lightblue")
+
+```
+
+Some of the clusters seem to be balanced, while the third one is clearly unbalanced. 
+Maybe this second cluster is associated to the customers with basic studies.
+By looking and analyzing the centers we are able to understand each cluster and the customer belonging to them.
+
+
+```{r}
+
+centers = fit$centers
+centers
+
+```
+
+
+Now, we can plot the centers for each variable on each cluster.
+Furthermore, we can represent the center for all the customers in each variable in the same plot.
+In this way, we are going to be able to see what are the characteristics which define a customer included in a cluster.
+
+
+#### Centers: cluster 1
+
+```{r}
+
+i = 1
+bar1=barplot(centers[i,], las=2, col="darkblue", ylim=c(-2,2), main=paste("Cluster", i,": Group center in blue, global center in red"))
+points(bar1,y=apply(x, 2, quantile, 0.50),col="red",pch=19)
+
+```
+
+The customers in this cluster seem to have a lower income, lower number of total bought products and few purchases
+
+
+#### Centers: cluster 2
+
+```{r}
+
+i=2  
+bar1=barplot(centers[i,], las=2, col="darkblue", ylim=c(-2,2), main=paste("Cluster", i,": Group center in blue, global center in red"))
+points(bar1,y=apply(x, 2, quantile, 0.50),col="red",pch=19)
+
+```
+
+The customers in this cluster are around the mean with respect the income and bought products.
+
+
+## The cusplot
+
+```{r}
+
+fviz_cluster(fit, data = x, geom = c("point"),ellipse.type = 'norm', pointsize=1)+
+  theme_minimal()+geom_text(label=customer_ids,hjust=0, vjust=0,size=2,check_overlap = T)+scale_fill_brewer(palette="Paired")
+
+```
+
+Due to the graphical representation of the clusters we can see that some of the clusters are considerably overlapping themselves, which may tell us that the number of selected clusters is not the correct one.
+
+
+## The Silhouette plot
+
+By using the silhouette plot and the silhouette widths we are able to tell how good an observation matches its own cluster. This method is based on distances. More specifically, on the distances between an observation and the other ones in its same cluster.It also takes into account the distances between the observation and the ones in other clusters.
+
+
+```{r}
+
+library("cluster")
+
+```
+
+```{r}
+
+d = dist(x, method="euclidean")  
+sil = silhouette(groups, d)
+plot(sil, col=1:5, main="", border=NA)
+
+summary(sil)
+
+```
+
+We can clearly see that only the first cluster has every Silhouette coefficient positive, which means that all the other clusters contain some observations which do not belong to that cluster. This may be another way to prove the idea previously mentioned; the number of selected clusters seems to be wrong.
+
+## How many clusters should we select?
+
+#### Based on total within sum of squares (WSS)
+
+```{r}
+
+fviz_nbclust(x, kmeans, method = 'wss')
+
+```
+
+#### Based on Silhouette widths
+
+```{r}
+
+fviz_nbclust(x, kmeans, method = 'silhouette')
+
+```
+
+#### Based on gap statistics
+
+```{r}
+
+fviz_nbclust(x, kmeans, method = 'gap_stat', k.max = 10)
+
+```
+
+As we can see, using different methods to obtain the optimal number of clusters we obtain different results.
+However, our initial hypothesis was that maybe the customers could be grouped into two clusters based on their level of studies.
+As the WSS and Silhouette methods tell us that the optimal number of clusters is around 2 and 3, I have decided to choose 3 clusters at the moment.
+
+```{r}
+
+fit = kmeans(x, centers = 3, nstart = 100)
+groups = fit$cluster
+groups
+
+```
+
+```{r}
+
+fviz_cluster(fit, data = x, geom = c("point"),ellipse.type = 'norm', pointsize=1)+
+  theme_minimal()+geom_text(label=customer_ids,hjust=0, vjust=0,size=3,check_overlap = T)+scale_fill_brewer(palette="Paired")
+
+```
+
+Now, let's analyze the characteristics of each of the clusters in order to understand which are the main differences between the customers in each of them.
+
+First, let's plot the distribution of income for each cluster
+
+```{r}
+
+as.data.frame(x) %>% mutate(cluster=factor(groups), IDs=customer_ids, Income= marketing_data1$Income, TotProds=marketing_data1$TotProds) %>%
+  ggplot(aes(x = cluster, y = Income)) + 
+  geom_boxplot(fill="lightblue") +
+  labs(title = "Distribution of income by cluster", x = "", y = "", col = "")
+
+```
+
+Secondly, let's see the distribution of total bought products.
+
+```{r}
+
+as.data.frame(x) %>% mutate(cluster=factor(groups), IDs=customer_ids, Income= marketing_data1$Income, TotProds=marketing_data1$TotProds) %>%
+  ggplot(aes(x = cluster, y = TotProds)) + 
+  geom_boxplot(fill="lightblue") +
+  labs(title = "Distribution of total bought products by cluster", x = "", y = "", col = "")
+
+```
+
+Also, we can see the distribution of age for each cluster and the number of days the customers have been enrolled to the company
+
+```{r}
+
+as.data.frame(x) %>% mutate(cluster=factor(groups), IDs=customer_ids, Age = marketing_data1$Age, Enrolled = marketing_data1$Days_Enrolled) %>%
+  ggplot(aes(x = cluster, y = Age)) + 
+  geom_boxplot(fill="lightblue") +
+  labs(title = "Distribution of age by cluster", x = "", y = "", col = "")
+
+```
+
+```{r}
+
+as.data.frame(x) %>% mutate(cluster=factor(groups), IDs=customer_ids, Age = marketing_data1$Age, Enrolled = marketing_data1$Days_Enrolled) %>%
+  ggplot(aes(x = cluster, y = Enrolled)) + 
+  geom_boxplot(fill="lightblue") +
+  labs(title = "Distribution of the number of enrolled days by cluster", x = "", y = "", col = "")
+
+```
+
+## Profile variables
+
+Finally, let's take into account two of the variables that we did not use for the clustering: Marital Status and Education
+
+```{r}
+
+as.data.frame(x) %>% mutate(cluster=factor(groups), IDs=customer_ids, Marital_Status = as.factor(marketing_data$Marital_Status), Education = as.factor(marketing_data$Education)) %>%
+  ggplot(aes(x = cluster,fill = Marital_Status)) + 
+  geom_bar(position = position_fill()) +
+  labs(title = "Marital status of customers in each cluster", x = "Cluster", y = "", col = "")
+
+```
+
+```{r}
+
+as.data.frame(x) %>% mutate(cluster=factor(groups), IDs=customer_ids, Marital_Status = as.factor(marketing_data$Marital_Status), Education = as.factor(marketing_data$Education)) %>%
+  ggplot(aes(x = cluster,fill = Education)) + 
+  geom_bar(position = position_fill()) +
+  labs(title = "Education level of customers in each cluster", x = "Cluster", y = "", col = "")
+
+```
+
+# Conclusions
+
+After plotting different variables and their distributions for each of the clusters, we can clearly extract some good ideas.
+
+The first cluster is composed by customers with a low income and few bought products (these both are related). 
+Furthermore, in comparison with the other clusters, this one contains the highest proportion of customers with a basic level of studies.
+
+In the case of the second cluster, customers have a medium income and number of bought products.
+Also, proportion of customers with basic studies in this cluster is minimal.
+Nevertheless, this cluster is characterized by having the most loyal customers, those who have been enrolled to the company the most time.
+
+Finally, the third cluster is composed by all the customers with high incomes and number of bought products. 
+All these customers have a high level of studies (2nd Cycle, Graduate, Master, PhD).
+Their loyalty to the company is quite similar to the one of the first cluster.
+
+To conclude, we can add that the age does not seem to be determinant in order to differentiate between the clusters, as well as the marital status, whose proportion is quite similar in the three clusters.
+
+
+## Other types of clustering: Mahalanobis distance
+
+```{r}
+
+S_x = cov(marketing_data1) # calculate the covariance matrix of the marketing data
+iS = solve(S_x) # calculate the inverse of S_x
+e = eigen(iS)
+V = e$vectors
+B = V %*% diag(sqrt(e$values)) %*% t(V) # square root of iS
+Xtil = scale(marketing_data1,scale = FALSE)
+marketingS = Xtil %*% B
+
+```
+
+Now, we apply k_means algorithm with 3 centers
+
+```{r}
+
+fit.mahalanobis = kmeans(marketingS, centers=3, nstart=100)
+groups = fit.mahalanobis$cluster
+centers=fit.mahalanobis$centers
+colnames(centers)=colnames(x)
+centers
+
+```
+
+Let's see the centers of the clusters in comparison with the global centers for each variable
+
+### Cluster 1
+
+```{r}
+
+i=1
+bar1=barplot(centers[i,], las=2, col="darkblue", ylim=c(-2,2), main=paste("Cluster", i,": Group center in blue, global center in red"))
+points(bar1,y=apply(x, 2, quantile, 0.50),col="red",pch=19)
+
+```
+
+### Cluster 2
+
+```{r}
+
+i=2 
+bar1=barplot(centers[i,], las=2, col="darkblue", ylim=c(-2,2), main=paste("Cluster", i,": Group center in blue, global center in red"))
+points(bar1,y=apply(x, 2, quantile, 0.50),col="red",pch=19)
+
+```
+
+### Cluster 3
+
+```{r}
+
+i=3
+bar1=barplot(centers[i,], las=2, col="darkblue", ylim=c(-2,2), main=paste("Cluster", i,": Group center in blue, global center in red"))
+points(bar1,y=apply(x, 2, quantile, 0.50),col="red",pch=19)
+
+```
+
+The conclusions we can drag form this plots are quite similar to the ones obtained through the euclidean distance method.However, how similar are these two clustering models?
+
+Let's first plot the Mahalanobis one and then compare them.
+
+```{r}
+
+fviz_cluster(fit.mahalanobis, data = x, geom = c("point"),ellipse.type = 'norm', pointsize=1)+
+  theme_minimal()+geom_text(label=customer_ids,hjust=0, vjust=0,size=2,check_overlap = T)+scale_fill_brewer(palette="Paired")
+
+```
+
+
+## Comparison of the clusters
+
+```{r}
+
+library(mclust)
+adjustedRandIndex(fit$cluster, fit.mahalanobis$cluster) 
+
+```
+
+To our surprise, the clusters are not so different depending on the method used.
+Personally, I would consider the Euclidean distance method rather than the Mahalanobis one.
+
+
+## Other types of clustering: PAM
+
+In this case the centers will be observations with minimum distance to the others inside the same cluster
+
+```{r}
+
+fit.pam <- eclust(x, "pam", stand=TRUE, k=5, graph=F)
+
+fviz_cluster(fit.pam, data = x, geom = c("point"), pointsize=1)+
+  theme_minimal()+geom_text(label=customer_ids,hjust=0, vjust=0,size=2,check_overlap = F)+scale_fill_brewer(palette="Paired")
+
+```
+
+
+The optimal number of clusters based on the silhouette.
+
+```{r}
+
+fviz_nbclust(scale(x), pam, method = 'silhouette', k.max = 10)
+
+```
+
+The optimal number of clusters based on gap statistic
+
+```{r}
+
+fviz_nbclust(scale(x), pam, method = "gap_stat", k.max = 8, nboot = 20)
+
+```
+
+As the number of optimal clusters is different depending on the method, let's take an intermediate value.
+We select 3 as the number of clusters and compare it to the clustering models previously created.
+
+```{r}
+
+adjustedRandIndex(fit$cluster,fit.pam$clustering)
+
+```
+
+## Other type of clustering: Hierarchical clustering
+
+In this case, we will focus on the agglomerative hierarchical clustering. This consists on merging observations one by one depending on their distance to each other.
+To simplify, we start by having as many clusters as observations and finish by having one cluster containing all of them.
+
+```{r}
+
+d = dist(scale(x), method = "euclidean")
+hc = hclust(d, method = "ward.D2") 
+
+```
+
+```{r}
+
+names(hc)
+hc$call
+
+```
+
+Let's visualize the hierarchical clustering by using a dendogram
+
+```{r}
+
+hc$labels <- customer_ids
+
+fviz_dend(x = hc, 
+          k=3,
+          palette = "jco", 
+          rect = TRUE, rect_fill = TRUE, 
+          rect_border = "jco"          
+)
+
+```
+
+However, it is really difficult for us to see anything in this dendogram.
+
+## Other type of clustering: EM clustering
+
+The Expectation_Maximization clustering computes the probability that an observation belongs to a cluster by using different distributions.
+We will use the function Mclust for this work.
+
+```{r}
+
+res.Mclust = Mclust(scale(x))
+summary(res.Mclust)
+
+```
+
+
+The probabilities that a customer belongs to each group
+
+```{r}
+
+head(res.Mclust$z)
+
+```
+
+Obviously, the group with higher probability is assigned
+
+```{r}
+
+head(res.Mclust$classification)
+
+```
+
+
+## The cusplot
+
+```{r}
+
+fviz_mclust(object = res.Mclust, what = "classification", geom = "point",
+            pallete = "jco")
+
+```
+
+
+## Comparison of how similar are the clusters generated by each method
+
+#### PAM and EM clustering
+
+```{r}
+
+adjustedRandIndex(res.Mclust$classification, fit.pam$clustering) 
+
+```
+
+#### K-means and EM clustering
+
+```{r}
+
+adjustedRandIndex(res.Mclust$classification, fit$cluster) 
+
+```
+
+In relation with the EM clustering, we can conclude that it is the less similar to PAM and K-means.
+For this specific study, after all this types of clustering, I still consider that K-means fits our data the best and makes it easier to differentiate the customers into groups.
+
+# Summary
+
+After cleaning our dataset by eliminating the missing values and modifying some variables to work easier (feauture engineering), we have used different unsupervised learning techniques. First of all, we have been able to apply dimension reduction techniques to the data, such as Principal Component Analysis (PCA) and Factor Analysis (FA). This two techniques have allowed us to develop a initial hypothesis which has been finally proved: are the customers mostly classified based on their income and bought products? Then, we have used different clustering techniques: k-means(euclidean and mahalanobic distances), Partition Around Medoids (PAM), Hierarchical (agglomerative), and Expectation Maximization (EM). The clusters generated by all of them, except the one generated by the EM clutering, seem to be quite similar. We have been able to conclude that there are 3 different groups of customers: 
+
+1. Low income, few bought products, high proportion of customers with basic level of studies
+
+2. Medium income, mean number of bought products, minimal proportion of customers with basic level of studies and very high loyalty to the company
+
+3. High income, many bought products, all customers have a high level of studies and low loyalty to the firm (the same than the first group)
+
+Furthermore, the distribution of the age is very similar for the three groups and the marital status proportions are almost equal in all the cases.
+
+To conclude, I would like to point the idea that this whole process can be applied to many datasets, can be very useful and have many different applications, not only for marketing purposes like in this specific case. 
+
+
+
+
+
+
+
+
+
